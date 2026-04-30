@@ -1,0 +1,7 @@
+flask
+flask-cors
+firebase-admin
+numpy
+pandas
+python-dotenv
+requests
