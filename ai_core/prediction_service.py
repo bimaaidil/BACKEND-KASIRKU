@@ -1,6 +1,6 @@
+# backend/ai_core/prediction_service.py
 import numpy as np
 import pandas as pd
-import tensorflow as tf
 import joblib
 import os
 
@@ -15,9 +15,15 @@ scaler = None
 def load_ai_model():
     global model, scaler
     try:
-        if os.path.exists(MODEL_PATH):
-            model = tf.keras.models.load_model(MODEL_PATH)
-            print("✅ Model Bi-LSTM Berhasil Dimuat!")
+        # PENGAMAN VERCEL: Lakukan import tensorflow di dalam try-except block
+        try:
+            import tensorflow as tf
+            if os.path.exists(MODEL_PATH):
+                model = tf.keras.models.load_model(MODEL_PATH)
+                print("✅ Model Bi-LSTM Berhasil Dimuat!")
+        except ImportError:
+            print("⚠️ TensorFlow tidak terpasang di cloud (Vercel). Mengaktifkan Mode Simulasi Cerdas.")
+
         if os.path.exists(SCALER_PATH):
             scaler = joblib.load(SCALER_PATH)
             print("✅ Scaler Berhasil Dimuat!")
@@ -46,35 +52,41 @@ def predict_sales(weather_factor=0.5):
             "Timun": {"qty": 2, "unit": "kg", "ratio": 0.02}
         }
 
-# 2. Prediksi Tren via Bi-LSTM
+        # 2. Prediksi Tren via Bi-LSTM atau Fallback Mode
         csv_path = os.path.join(BASE_DIR, '../dataset/dataset_penjualan.csv')
         total_cups_predicted = 150 
 
-        if os.path.exists(csv_path):
-            # Membaca CSV dengan separator titik koma (sesuai dataset Anda)
+        # Jalankan logika model jika TensorFlow dan Scaler sukses ter-load
+        if model is not None and scaler is not None and os.path.exists(csv_path):
             df = pd.read_csv(csv_path, sep=';')
             df['Tanggal'] = pd.to_datetime(df['Tanggal'], dayfirst=True)
             
             if not df.empty:
-                # Ambil 7 hari terakhir
                 last_7_days = df.tail(7).copy()
-                
-                # Buat fitur weekend (Sama seperti saat training)
                 last_7_days['Hari'] = last_7_days['Tanggal'].dt.weekday
                 last_7_days['is_weekend'] = last_7_days['Hari'].map(lambda x: 1 if x >= 5 else 0)
                 
-                # Menyiapkan Input (Sales & Weekend)
                 sales_data = last_7_days['Total_Produk_Terjual'].values.reshape(-1, 1)
                 scaled_sales = scaler.transform(sales_data)
                 scaled_weekend = last_7_days['is_weekend'].values.reshape(-1, 1)
                 
-                # Gabungkan menjadi 2 kolom (Sangat Penting!)
                 X_input = np.hstack((scaled_sales, scaled_weekend))
-                X_input = X_input.reshape(1, 7, 2) # 1 sampel, 7 hari, 2 fitur
+                X_input = X_input.reshape(1, 7, 2) 
                 
-                # Jalankan Prediksi
                 pred_scaled = model.predict(X_input, verbose=0)
                 total_cups_predicted = scaler.inverse_transform(pred_scaled)[0][0]
+        else:
+            # --- FALLBACK CERDAS (Untuk Lingkungan Serverless Vercel) ---
+            # Jika dijalankan di Vercel, hitung estimasi porsi secara aman menggunakan data historis CSV
+            if os.path.exists(csv_path):
+                df = pd.read_csv(csv_path, sep=';')
+                if not df.empty:
+                    # Ambil rata-rata tertimbang dari 5 hari penjualan terakhir di CSV
+                    recent_sales = df.tail(5)['Total_Produk_Terjual'].values
+                    if len(recent_sales) == 5:
+                        total_cups_predicted = np.average(recent_sales, weights=[0.1, 0.1, 0.2, 0.2, 0.4])
+                    else:
+                        total_cups_predicted = np.mean(recent_sales)
 
         # 3. Pengaruh Cuaca
         weather_multiplier = 1.0
@@ -91,17 +103,14 @@ def predict_sales(weather_factor=0.5):
         for name, config in min_stock_config.items():
             ai_demand = total_cups_predicted * config['ratio'] * weather_multiplier
             
-            # --- LOGIKA KHUSUS NENAS, MELON, SEMANGKA ---
+            # LOGIKA KHUSUS NENAS, MELON, SEMANGKA
             if any(b in name for b in buah_tetap):
-                # Target selalu 2 buah, tidak peduli hujan atau prediksi AI
                 final_target = 2 
             
-            # --- LOGIKA UNTUK BUAH LAIN ---
+            # LOGIKA UNTUK BUAH LAINNYA
             elif is_raining:
-                # Hujan: Target boleh turun di bawah stok awal (Efisiensi)
                 final_target = max(1, ai_demand)
             else:
-                # Normal: Gunakan batas aman minimal
                 final_target = max(config['qty'], ai_demand)
 
             results.append({
