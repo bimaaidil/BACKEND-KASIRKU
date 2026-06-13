@@ -1,3 +1,4 @@
+# backend/routes/prediksi.py
 from flask import Blueprint, request, jsonify
 import requests
 from firebase_config import db
@@ -7,6 +8,7 @@ from datetime import datetime
 # Import fungsi utama AI
 from ai_core.prediction_service import predict_sales
 
+# Tetapkan blueprint name tetap 'prediksi'
 prediksi_bp = Blueprint('prediksi', __name__)
 
 def get_real_weather(weather_index=1):
@@ -19,15 +21,14 @@ def get_real_weather(weather_index=1):
         # Koordinat Pekanbaru (Lokasi Varisha Jus)
         lat, lon = 0.5071, 101.4478 
         
-        # PERBAIKAN: Menambahkan hourly=relative_humidity_2m di URL API
+        # Menambahkan hourly=relative_humidity_2m di URL API Open-Meteo
         url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&daily=temperature_2m_max,weathercode&hourly=relative_humidity_2m&timezone=Asia%2FBangkok"
         res = requests.get(url).json()
         
         temp = res['daily']['temperature_2m_max'][weather_index]
         code = res['daily']['weathercode'][weather_index]
         
-        # PERBAIKAN: Mengambil data kelembapan (humidity) pada jam 12:00 siang di hari target
-        # Indeks jam: 0-23 (Hari Ini), 24-47 (Besok)
+        # Mengambil data kelembapan (humidity) pada jam 12:00 siang di hari target
         hour_index = (weather_index * 24) + 12
         humidity = res['hourly']['relative_humidity_2m'][hour_index]
         
@@ -38,7 +39,6 @@ def get_real_weather(weather_index=1):
         elif code <= 3:
             cond, insight, factor = "Cerah Berawan", "Suhu stabil, stok buah aman.", 0.8
             
-        # PERBAIKAN: Menambahkan 'humidity' ke data yang di-return
         return {
             "temp": temp, 
             "condition": cond, 
@@ -48,23 +48,22 @@ def get_real_weather(weather_index=1):
         }
     except Exception as e:
         print(f"❌ Weather API Error: {e}")
-        # Tambahkan fallback humidity jika API gagal (misal 75%)
+        # Fallback data jika API Open-Meteo mengalami gangguan/limit
         return {"temp": 30, "condition": "Cerah", "humidity": 75, "insight": "Mode Offline Aktif.", "factor": 0.8}
 
-@prediksi_bp.route('', methods=['GET'])
+# PERBAIKAN RUTING: Ubah '' menjadi '/prediksi' agar cocok dengan axios.get di frontend kamu!
+@prediksi_bp.route('/prediksi', methods=['GET'])
 def get_prediction():
     try:
         # 1. LOGIKA WAKTU OPERASIONAL (Belanja Subuh vs Prediksi Besok)
         now = datetime.now()
         current_hour = now.hour
         
-        # Jika dibuka jam 00:00 - 05:59 pagi, target adalah hari yang sama
         if current_hour < 6:
             target_label = "Hari Ini"
             w_index = 0 
             display_date = now.strftime("%A, %d %B %Y")
         else:
-            # Jika dibuka di atas jam 6 pagi, target adalah hari esok
             target_label = "Besok"
             w_index = 1
             display_date = "Besok" 
@@ -81,7 +80,6 @@ def get_prediction():
         for d in prods_ref:
             p = d.to_dict()
             name_db = (p.get('nama') or p.get('name') or "").strip().lower()
-            # Gunakan float agar sinkron dengan input stok opname (desimal kg)
             db_items.append({
                 "id": d.id, 
                 "name": name_db, 
@@ -93,7 +91,7 @@ def get_prediction():
         for item in ai_data:
             ai_name_lower = item['name'].lower().strip()
             
-            # Cari produk yang namanya cocok (fuzzy match sederhana)
+            # Cari produk yang cocok di Firestore (fuzzy match sederhana)
             match = next((x for x in db_items if ai_name_lower in x['name'] or x['name'] in ai_name_lower), None)
             
             if match:
@@ -105,7 +103,7 @@ def get_prediction():
                     "unit": item['unit']
                 })
 
-        # 6. Data untuk Visualisasi Grafik (Dummy untuk demo tren)
+        # 6. Data untuk Visualisasi Grafik (Dummy untuk demo tren porsi)
         chart_data = [
             {"date": "H-4", "penjualan": random.randint(110, 140)},
             {"date": "H-3", "penjualan": random.randint(120, 150)},

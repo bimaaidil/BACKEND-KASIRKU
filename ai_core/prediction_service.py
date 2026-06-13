@@ -1,9 +1,10 @@
+# backend/ai_core/prediction_service.py
 import numpy as np
 import pandas as pd
 import joblib
 import os
 
-# Konfigurasi Path
+# Konfigurasi Path Absolut Kritis untuk Lingkungan Serverless Vercel
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, 'model_bilstm.h5')
 SCALER_PATH = os.path.join(BASE_DIR, 'scaler.pkl')
@@ -14,7 +15,7 @@ scaler = None
 def load_ai_model():
     global model, scaler
     try:
-        # PENGAMAN VERCEL: Import tensorflow di dalam try-except agar jika library tidak ada, server tidak crash
+        # PENGAMAN VERCEL: Lakukan import dinamis agar tidak memicu ModuleNotFoundError
         try:
             import tensorflow as tf
             if os.path.exists(MODEL_PATH):
@@ -33,7 +34,7 @@ load_ai_model()
 
 def predict_sales(weather_factor=0.5):
     try:
-        # 1. Konfigurasi Stok Awal Minimum (Safety Stock)
+        # 1. Konfigurasi Stok Awal Minimum (Safety Stock Standar Varisha Jus)
         min_stock_config = {
             "Apel": {"qty": 2, "unit": "kg", "ratio": 0.02},
             "Belimbing": {"qty": 2, "unit": "kg", "ratio": 0.02},
@@ -51,8 +52,8 @@ def predict_sales(weather_factor=0.5):
             "Timun": {"qty": 2, "unit": "kg", "ratio": 0.02}
         }
 
-        # 2. Prediksi Tren via Bi-LSTM atau Fallback Mode
-        csv_path = os.path.join(BASE_DIR, '../dataset/dataset_penjualan.csv')
+        # 2. Amankan jalur pencarian dataset CSV di Cloud Runtime
+        csv_path = os.path.abspath(os.path.join(BASE_DIR, '..', 'dataset', 'dataset_penjualan.csv'))
         total_cups_predicted = 150 
 
         if model is not None and scaler is not None and os.path.exists(csv_path):
@@ -74,7 +75,7 @@ def predict_sales(weather_factor=0.5):
                 pred_scaled = model.predict(X_input, verbose=0)
                 total_cups_predicted = scaler.inverse_transform(pred_scaled)[0][0]
         else:
-            # --- FALLBACK CERDAS UNTUK LINGKUNGAN VERCEL ---
+            # --- FALLBACK CERDAS UNTUK LINGKUNGAN VERCEL SERVERLESS ---
             if os.path.exists(csv_path):
                 df = pd.read_csv(csv_path, sep=';')
                 if not df.empty:
@@ -84,7 +85,7 @@ def predict_sales(weather_factor=0.5):
                     else:
                         total_cups_predicted = np.mean(recent_sales)
 
-        # 3. Pengaruh Cuaca
+        # 3. Pengaruh Faktor Cuaca Terhadap Multiplier Koefisien Penjualan
         weather_multiplier = 1.0
         is_raining = weather_factor <= 0.4
         if weather_factor >= 0.8: 
@@ -92,7 +93,7 @@ def predict_sales(weather_factor=0.5):
         elif is_raining: 
             weather_multiplier = 0.7
 
-        # 4. Gabungkan Logika (Adaptif & Fixed untuk Buah Satuan)
+        # 4. Gabungkan Logika Campuran (Adaptif & Fixed untuk Buah Satuan)
         results = []
         buah_tetap = ['Nenas', 'Melon', 'Semangka', 'Nanas']
 
