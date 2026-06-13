@@ -12,7 +12,7 @@ from routes.prediksi import prediksi_bp
 app = Flask(__name__)
 
 # Mengizinkan semua origin agar tidak ada error CORS lagi
-CORS(app, resources={r"/api/*": {"origins": "*"}}) 
+CORS(app)
 
 # Register Blueprints
 app.register_blueprint(karyawan_bp, url_prefix='/api/karyawan')
