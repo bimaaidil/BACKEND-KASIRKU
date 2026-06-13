@@ -1,4 +1,3 @@
-# backend/ai_core/prediction_service.py
 import numpy as np
 import pandas as pd
 import joblib
@@ -15,14 +14,14 @@ scaler = None
 def load_ai_model():
     global model, scaler
     try:
-        # PENGAMAN VERCEL: Lakukan import tensorflow di dalam try-except block
+        # PENGAMAN VERCEL: Import tensorflow di dalam try-except agar jika library tidak ada, server tidak crash
         try:
             import tensorflow as tf
             if os.path.exists(MODEL_PATH):
                 model = tf.keras.models.load_model(MODEL_PATH)
                 print("✅ Model Bi-LSTM Berhasil Dimuat!")
         except ImportError:
-            print("⚠️ TensorFlow tidak terpasang di cloud (Vercel). Mengaktifkan Mode Simulasi Cerdas.")
+            print("⚠️ TensorFlow tidak ditemukan di cloud. Mengaktifkan Fallback Mode.")
 
         if os.path.exists(SCALER_PATH):
             scaler = joblib.load(SCALER_PATH)
@@ -56,7 +55,6 @@ def predict_sales(weather_factor=0.5):
         csv_path = os.path.join(BASE_DIR, '../dataset/dataset_penjualan.csv')
         total_cups_predicted = 150 
 
-        # Jalankan logika model jika TensorFlow dan Scaler sukses ter-load
         if model is not None and scaler is not None and os.path.exists(csv_path):
             df = pd.read_csv(csv_path, sep=';')
             df['Tanggal'] = pd.to_datetime(df['Tanggal'], dayfirst=True)
@@ -76,12 +74,10 @@ def predict_sales(weather_factor=0.5):
                 pred_scaled = model.predict(X_input, verbose=0)
                 total_cups_predicted = scaler.inverse_transform(pred_scaled)[0][0]
         else:
-            # --- FALLBACK CERDAS (Untuk Lingkungan Serverless Vercel) ---
-            # Jika dijalankan di Vercel, hitung estimasi porsi secara aman menggunakan data historis CSV
+            # --- FALLBACK CERDAS UNTUK LINGKUNGAN VERCEL ---
             if os.path.exists(csv_path):
                 df = pd.read_csv(csv_path, sep=';')
                 if not df.empty:
-                    # Ambil rata-rata tertimbang dari 5 hari penjualan terakhir di CSV
                     recent_sales = df.tail(5)['Total_Produk_Terjual'].values
                     if len(recent_sales) == 5:
                         total_cups_predicted = np.average(recent_sales, weights=[0.1, 0.1, 0.2, 0.2, 0.4])
@@ -103,11 +99,8 @@ def predict_sales(weather_factor=0.5):
         for name, config in min_stock_config.items():
             ai_demand = total_cups_predicted * config['ratio'] * weather_multiplier
             
-            # LOGIKA KHUSUS NENAS, MELON, SEMANGKA
             if any(b in name for b in buah_tetap):
                 final_target = 2 
-            
-            # LOGIKA UNTUK BUAH LAINNYA
             elif is_raining:
                 final_target = max(1, ai_demand)
             else:
