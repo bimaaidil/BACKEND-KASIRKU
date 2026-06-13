@@ -1,3 +1,4 @@
+# backend/routes/absensi.py
 from flask import Blueprint, request, jsonify
 from firebase_config import db
 from datetime import datetime
@@ -5,7 +6,7 @@ from datetime import datetime
 absensi_bp = Blueprint('absensi', __name__)
 COLLECTION_NAME = 'attendance'
 
-#1. AMBIL DATA (GET)
+# 1. AMBIL DATA (GET)
 @absensi_bp.route('', methods=['GET'])
 def get_absensi():
     try:
@@ -27,6 +28,8 @@ def clock_in():
         data = request.json
         employee_id = data.get('employee_id')
         employee_name = data.get('employee_name')
+        
+        # PERBAIKAN UTAMA: Ambil data payload frontend menggunakan parameter 'jenis_absen' secara presisi
         jenis_absen = data.get('jenis_absen', 'Reguler') 
         
         if not employee_id:
@@ -37,7 +40,7 @@ def clock_in():
         time_str = now.strftime('%H:%M:%S')
 
         # CEK DUPLIKAT SPESIFIK:
-        # Mencari apakah sudah ada absen dengan TANGGAL sama DAN JENIS sama
+        # Melakukan query secara presisi ke database Cloud Firestore
         existing = db.collection(COLLECTION_NAME)\
             .where('employee_id', '==', employee_id)\
             .where('date', '==', date_str)\
