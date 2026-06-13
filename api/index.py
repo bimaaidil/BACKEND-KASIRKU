@@ -1,3 +1,4 @@
+# api/index.py atau app.py
 from flask import Flask, jsonify
 from flask_cors import CORS 
 import os
@@ -11,7 +12,7 @@ from routes.prediksi import prediksi_bp
 
 app = Flask(__name__)
 
-# PERBAIKAN CORS UTAMA: Buka akses CORS secara global untuk semua rute dan origin
+# Buka akses CORS secara global untuk mendukung pertukaran data frontend-backend di Vercel
 CORS(app, supports_credentials=True)
 
 # Register Blueprints
@@ -19,7 +20,11 @@ app.register_blueprint(karyawan_bp, url_prefix='/api/karyawan')
 app.register_blueprint(absensi_bp, url_prefix='/api/absensi')
 app.register_blueprint(produk_bp, url_prefix='/api/produk')
 app.register_blueprint(transaksi_bp, url_prefix='/api/transaksi')
-app.register_blueprint(prediksi_bp, url_prefix='/api')
+
+# PERBAIKAN FINAL SINKRONISASI AI:
+# Hilangkan url_prefix='/api' agar rute '/prediksi' di routes/prediksi.py 
+# langsung diakses lurus di root URL oleh frontend kamu, bebas dari eror 404!
+app.register_blueprint(prediksi_bp, url_prefix='')
 
 # Handle rute root / agar Vercel tidak bingung saat mengecek status server
 @app.route('/')
