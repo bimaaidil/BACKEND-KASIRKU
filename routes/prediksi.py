@@ -1,108 +1,130 @@
 from flask import Blueprint, request, jsonify
 import requests
 from firebase_config import db
-from datetime import datetime, timedelta
 import random
+from datetime import datetime
 
-# Import otak AI
+# Import fungsi utama AI
 from ai_core.prediction_service import predict_sales
 
 prediksi_bp = Blueprint('prediksi', __name__)
 
-# --- API CUACA (OPEN-METEO) ---
-def get_real_weather():
+def get_real_weather(weather_index=1):
+    """
+    Mengambil data cuaca berdasarkan indeks hari.
+    weather_index 0 = Hari Ini
+    weather_index 1 = Besok
+    """
     try:
-        # Koordinat Pekanbaru
+        # Koordinat Pekanbaru (Lokasi Varisha Jus)
         lat, lon = 0.5071, 101.4478 
-        url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&daily=temperature_2m_max,weathercode&timezone=Asia%2FBangkok"
         
-        response = requests.get(url).json()
+        # PERBAIKAN: Menambahkan hourly=relative_humidity_2m di URL API
+        url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&daily=temperature_2m_max,weathercode&hourly=relative_humidity_2m&timezone=Asia%2FBangkok"
+        res = requests.get(url).json()
         
-        temp_max = response['daily']['temperature_2m_max'][1]
-        weather_code = response['daily']['weathercode'][1]
+        temp = res['daily']['temperature_2m_max'][weather_index]
+        code = res['daily']['weathercode'][weather_index]
         
-        condition = "Cerah"
-        insight = "Cuaca besok mendukung penjualan!"
-        factor = 0.9
-
-        if weather_code >= 51: 
-            condition = "Hujan"
-            insight = "Waspada hujan! Stok mungkin aman."
-            factor = 0.3 
-        elif weather_code <= 3: 
-            condition = "Cerah Berawan"
-            insight = "Suhu hangat, stok buah aman."
-            factor = 0.8
+        # PERBAIKAN: Mengambil data kelembapan (humidity) pada jam 12:00 siang di hari target
+        # Indeks jam: 0-23 (Hari Ini), 24-47 (Besok)
+        hour_index = (weather_index * 24) + 12
+        humidity = res['hourly']['relative_humidity_2m'][hour_index]
+        
+        # Logika interpretasi kode cuaca
+        cond, insight, factor = "Cerah", "Cuaca bagus untuk jualan!", 0.9
+        if code >= 51:
+            cond, insight, factor = "Hujan", "Waspada hujan! Stok dikurangi agar efisien.", 0.3
+        elif code <= 3:
+            cond, insight, factor = "Cerah Berawan", "Suhu stabil, stok buah aman.", 0.8
             
-        return { "temp": temp_max, "condition": condition, "insight": insight, "factor": factor }
+        # PERBAIKAN: Menambahkan 'humidity' ke data yang di-return
+        return {
+            "temp": temp, 
+            "condition": cond, 
+            "humidity": humidity, 
+            "insight": insight, 
+            "factor": factor
+        }
     except Exception as e:
-        print(f"Gagal ambil cuaca: {e}")
-        return {"temp": 30, "condition": "Cerah", "insight": "Koneksi gangguan, asumsi cerah.", "factor": 0.8}
+        print(f"❌ Weather API Error: {e}")
+        # Tambahkan fallback humidity jika API gagal (misal 75%)
+        return {"temp": 30, "condition": "Cerah", "humidity": 75, "insight": "Mode Offline Aktif.", "factor": 0.8}
 
 @prediksi_bp.route('', methods=['GET'])
 def get_prediction():
     try:
-        # 1. AMBIL CUACA BESOK
-        weather = get_real_weather()
-
-        # 2. AMBIL DATA BAHAN BAKU
-        products_ref = db.collection('products').stream()
-        recommendations = []
+        # 1. LOGIKA WAKTU OPERASIONAL (Belanja Subuh vs Prediksi Besok)
+        now = datetime.now()
+        current_hour = now.hour
         
-        for doc in products_ref:
-            prod = doc.to_dict()
-            
-            # --- [PERBAIKAN UTAMA DISINI] ---
-            # Sesuaikan dengan nama kolom di Firestore Anda (image_cc443e.jpg)
-            
-            # 1. Ambil Nama (Cari 'nama' dulu, baru 'name')
-            prod_name = prod.get('nama') or prod.get('name') or "Produk Tanpa Nama"
-            
-            # 2. Ambil Stok (Cari 'stok' dulu, baru 'stock')
-            # Konversi ke int agar aman jika di db tertulis string "15"
-            try:
-                raw_stock = prod.get('stok') or prod.get('stock') or 0
-                current_stock = int(raw_stock)
-            except:
-                current_stock = 0
+        # Jika dibuka jam 00:00 - 05:59 pagi, target adalah hari yang sama
+        if current_hour < 6:
+            target_label = "Hari Ini"
+            w_index = 0 
+            display_date = now.strftime("%A, %d %B %Y")
+        else:
+            # Jika dibuka di atas jam 6 pagi, target adalah hari esok
+            target_label = "Besok"
+            w_index = 1
+            display_date = "Besok" 
 
-            unit = prod.get('unit', 'kg')
-            
-            # --- DUMMY DATA HISTORY (UNTUK DEMO) ---
-            dummy_history = [
-                random.randint(5, 15), 
-                random.randint(5, 15), 
-                random.randint(8, 20), 
-                random.randint(8, 20), 
-                random.randint(10, 25) 
-            ]
-            
-            # PANGGIL OTAK AI
-            predicted_qty = predict_sales(dummy_history, weather['factor'])
-            
-            recommendations.append({
-                "id": doc.id,
-                "name": prod_name,      # Kirim ke frontend sebagai 'name'
-                "currentStock": current_stock,
-                "predicted": predicted_qty,
-                "unit": unit
+        # 2. Ambil data cuaca sesuai indeks waktu
+        weather = get_real_weather(w_index)
+
+        # 3. Ambil hasil prediksi dari AI Service (Bi-LSTM + Logic Hybrid)
+        ai_data = predict_sales(weather['factor'])
+
+        # 4. Ambil stok aktual dari Firestore
+        prods_ref = db.collection('products').stream()
+        db_items = []
+        for d in prods_ref:
+            p = d.to_dict()
+            name_db = (p.get('nama') or p.get('name') or "").strip().lower()
+            # Gunakan float agar sinkron dengan input stok opname (desimal kg)
+            db_items.append({
+                "id": d.id, 
+                "name": name_db, 
+                "stok": float(p.get('stok') or 0)
             })
 
-        # 3. DATA GRAFIK
+        # 5. Sinkronisasi Data (Matching nama produk AI dengan Database)
+        final_recommendations = []
+        for item in ai_data:
+            ai_name_lower = item['name'].lower().strip()
+            
+            # Cari produk yang namanya cocok (fuzzy match sederhana)
+            match = next((x for x in db_items if ai_name_lower in x['name'] or x['name'] in ai_name_lower), None)
+            
+            if match:
+                final_recommendations.append({
+                    "id": match['id'],
+                    "name": item['name'],
+                    "currentStock": match['stok'],
+                    "predicted": item['predicted'],
+                    "unit": item['unit']
+                })
+
+        # 6. Data untuk Visualisasi Grafik (Dummy untuk demo tren)
         chart_data = [
-            {"date": "H-4", "penjualan": random.randint(10, 20)},
-            {"date": "H-3", "penjualan": random.randint(15, 25)},
-            {"date": "H-2", "penjualan": random.randint(12, 22)},
-            {"date": "Kemarin", "penjualan": random.randint(18, 28)},
-            {"date": "Besok (AI)", "penjualan": sum(d['predicted'] for d in recommendations) // (len(recommendations) or 1) + 5}
+            {"date": "H-4", "penjualan": random.randint(110, 140)},
+            {"date": "H-3", "penjualan": random.randint(120, 150)},
+            {"date": "H-2", "penjualan": random.randint(115, 145)},
+            {"date": "Kemarin", "penjualan": random.randint(160, 190)},
+            {"date": "Target AI", "penjualan": 212}
         ]
 
         return jsonify({
+            "status": "success",
+            "target_info": {
+                "label": target_label,
+                "date": display_date
+            },
             "weather": weather,
             "chart": chart_data,
-            "recommendations": recommendations
+            "recommendations": final_recommendations
         }), 200
 
     except Exception as e:
-        print(f"Error Backend: {e}")
-        return jsonify({"error": str(e)}), 500
+        print(f"❌ Error pada Route Prediksi: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
