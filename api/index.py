@@ -19,7 +19,7 @@ app.register_blueprint(karyawan_bp, url_prefix='/api/karyawan')
 app.register_blueprint(absensi_bp, url_prefix='/api/absensi')
 app.register_blueprint(produk_bp, url_prefix='/api/produk')
 app.register_blueprint(transaksi_bp, url_prefix='/api/transaksi')
-app.register_blueprint(prediksi_bp, url_prefix='/api/prediksi')
+app.register_blueprint(prediksi_bp, url_prefix='/api')
 
 # Handle rute root / agar Vercel tidak bingung saat mengecek status server
 @app.route('/')
