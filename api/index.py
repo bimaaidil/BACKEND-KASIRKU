@@ -1,4 +1,3 @@
-# api/index.py atau app.py
 from flask import Flask, jsonify
 from flask_cors import CORS 
 import os
@@ -9,6 +8,7 @@ from routes.absensi import absensi_bp
 from routes.produk import produk_bp
 from routes.transaksi import transaksi_bp
 from routes.prediksi import prediksi_bp 
+from routes.kas import kas_bp # <-- BARU: Import blueprint untuk modul kas
 
 app = Flask(__name__)
 
@@ -20,6 +20,7 @@ app.register_blueprint(karyawan_bp, url_prefix='/api/karyawan')
 app.register_blueprint(absensi_bp, url_prefix='/api/absensi')
 app.register_blueprint(produk_bp, url_prefix='/api/produk')
 app.register_blueprint(transaksi_bp, url_prefix='/api/transaksi')
+app.register_blueprint(kas_bp, url_prefix='/api/kas') # <-- BARU: Daftarkan endpoint kas dengan prefix /api/kas
 
 # PERBAIKAN FINAL SINKRONISASI AI:
 # Hilangkan url_prefix='/api' agar rute '/prediksi' di routes/prediksi.py 
