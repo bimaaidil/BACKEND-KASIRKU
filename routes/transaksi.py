@@ -17,7 +17,7 @@ COLLECTION_NAME = 'transactions'
 # SCOPES & CONFIGURATION GOOGLE DRIVE
 SCOPES = ['https://www.googleapis.com/auth/drive']
 # GANTI string di bawah ini dengan File ID dari Google Drive kamu yang dicatat di Tahap 1
-GOOGLE_DRIVE_FILE_ID = '16lyg69Y4v2zB4OAEuso34xnlB0zXStIh'
+GOOGLE_DRIVE_FILE_ID = '1VPHMSeWUrd3uFs1Q0TmnLZyjBWA6_Jo7'
 
 # Path absolut ke file kunci akses JSON di root folder
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
