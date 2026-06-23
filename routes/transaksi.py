@@ -1,3 +1,4 @@
+# routes/transaksi.py
 from flask import Blueprint, request, jsonify
 from firebase_config import db
 from datetime import datetime
@@ -8,7 +9,7 @@ import os
 transaksi_bp = Blueprint('transaksi', __name__)
 COLLECTION_NAME = 'transactions'
 
-# --- FUNGSI HELPER: UPDATE DATASET CSV UNTUK AI ---
+#  FUNGSI HELPER: UPDATE DATASET CSV UNTUK AI 
 def update_sales_csv(items, total_terjual):
     try:
         # Menentukan lokasi file dataset_penjualan.csv secara absolut
@@ -113,14 +114,30 @@ def add_transaction():
 @transaksi_bp.route('', methods=['GET'])
 def get_transactions():
     try:
-        docs = db.collection(COLLECTION_NAME).order_by('timestamp', direction='DESCENDING').stream()
+        transaksi_ref = db.collection(COLLECTION_NAME)
+        
+        # Menggunakan perlindungan try-except query untuk mengantisipasi jika index Firestore belum dibuat
+        try:
+            docs = transaksi_ref.order_by('timestamp', direction='DESCENDING').stream()
+        except Exception:
+            # Fallback otomatis jika order_by timestamp melempar error di cloud
+            docs = transaksi_ref.stream()
+            
         result = []
         for doc in docs:
             t = doc.to_dict()
             t['id'] = doc.id
-            if 'timestamp' in t:
+            
+            # Amankan konversi tipe data objek datetime menjadi string standard ISO agar tidak eror di React
+            if 'timestamp' in t and t['timestamp'] is not None:
                 t['timestamp'] = str(t['timestamp'])
+                
             result.append(t)
+            
+        # Jika menggunakan fallback stream biasa, lakukan penyortiran array di tingkat Python demi kestabilan data
+        if 'timestamp' in result[0] if result else False:
+            result = sorted(result, key=lambda x: x.get('timestamp', ''), reverse=True)
+            
         return jsonify(result), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
