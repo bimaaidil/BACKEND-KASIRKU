@@ -2,6 +2,7 @@
 import json
 import os
 import io
+import textwrap
 import pandas as pd
 from flask import Blueprint, request, jsonify
 from firebase_config import db
@@ -34,10 +35,29 @@ def get_drive_service():
         # Load string JSON menjadi dictionary Python
         cred_info = json.loads(cred_json_str)
         
-        # FIX PENTING: Mengubah escape ganda \\n menjadi newline \n murni agar JWT Signature lolos validasi Google
+        # --- PEMBERSIHAN PRIVATE KEY OTOMATIS (VERCEL PROOF) ---
         if 'private_key' in cred_info:
-            cred_info['private_key'] = cred_info['private_key'].replace('\\n', '\n')
+            pk = cred_info['private_key']
             
+            if "-----BEGIN PRIVATE KEY-----" in pk and "-----END PRIVATE KEY-----" in pk:
+                header = "-----BEGIN PRIVATE KEY-----"
+                footer = "-----END PRIVATE KEY-----"
+                
+                # 1. Ambil bagian string sandi murni di tengah
+                core_key = pk.replace(header, "").replace(footer, "").strip()
+                
+                # 2. Hancurkan semua spasi, literal \n, dan enter liar akibat Vercel
+                core_key = core_key.replace(" ", "").replace("\\n", "").replace("\n", "").replace("\r", "")
+                
+                # 3. Bungkus ulang rapi per 64 karakter (Standar baku format PEM Kriptografi)
+                wrapped_key = '\n'.join(textwrap.wrap(core_key, 64))
+                
+                # 4. Satukan kembali dengan header dan footer
+                cred_info['private_key'] = f"{header}\n{wrapped_key}\n{footer}\n"
+            else:
+                # Fallback cadangan
+                cred_info['private_key'] = pk.replace('\\n', '\n')
+                
         creds = service_account.Credentials.from_service_account_info(
             cred_info, 
             scopes=SCOPES
