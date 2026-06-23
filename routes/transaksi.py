@@ -1,35 +1,51 @@
 # routes/transaksi.py
+import json
+import os
+import io
+import pandas as pd
 from flask import Blueprint, request, jsonify
 from firebase_config import db
 from datetime import datetime
-import pandas as pd
-import os
-import io
+from dotenv import load_dotenv
 
 # --- IMPORT GOOGLE DRIVE API LIBRARIES ---
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 
+# Memuat berkas .env untuk pembacaan lokal di dalam folder backend
+load_dotenv()
+
 transaksi_bp = Blueprint('transaksi', __name__)
 COLLECTION_NAME = 'transactions'
 
 # SCOPES & CONFIGURATION GOOGLE DRIVE
 SCOPES = ['https://www.googleapis.com/auth/drive']
-# GANTI string di bawah ini dengan File ID dari Google Drive kamu yang dicatat di Tahap 1
 GOOGLE_DRIVE_FILE_ID = '1VPHMSeWUrd3uFs1Q0TmnLZyjBWA6_Jo7'
 
-# Path absolut ke file kunci akses JSON di root folder
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CREDENTIALS_PATH = os.path.join(BASE_DIR, 'credentials.json')
-
 def get_drive_service():
-    """Fungsi helper untuk membuat koneksi terotentikasi ke Google Drive API"""
-    if not os.path.exists(CREDENTIALS_PATH):
-        raise FileNotFoundError(f"File kredensial tidak ditemukan di: {CREDENTIALS_PATH}")
+    """Fungsi pembacaan kredensial via Environment Variable yang anti-error JWT Signature"""
+    cred_json_str = os.environ.get("GOOGLE_CREDENTIALS_JSON")
     
-    creds = service_account.Credentials.from_service_account_file(CREDENTIALS_PATH, scopes=SCOPES)
-    return build('drive', 'v3', credentials=creds)
+    if not cred_json_str:
+        raise ValueError("❌ Variabel GOOGLE_CREDENTIALS_JSON tidak ditemukan di .env atau Vercel Environment Variables!")
+        
+    try:
+        # Load string JSON menjadi dictionary Python
+        cred_info = json.loads(cred_json_str)
+        
+        # FIX PENTING: Mengubah escape ganda \\n menjadi newline \n murni agar JWT Signature lolos validasi Google
+        if 'private_key' in cred_info:
+            cred_info['private_key'] = cred_info['private_key'].replace('\\n', '\n')
+            
+        creds = service_account.Credentials.from_service_account_info(
+            cred_info, 
+            scopes=SCOPES
+        )
+        return build('drive', 'v3', credentials=creds)
+    except Exception as e:
+        print(f"❌ Kesalahan pada inisialisasi Google Auth: {e}")
+        raise e
 
 def update_sales_csv(items, total_terjual):
     try:
