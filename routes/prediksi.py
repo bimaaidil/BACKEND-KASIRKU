@@ -1,78 +1,114 @@
 # backend/routes/prediksi.py
-from flask import Blueprint, request, jsonify
+import os
+import io
+import json
+import textwrap
+import pandas as pd
 import requests
-from firebase_config import db
 import random
 from datetime import datetime
+from flask import Blueprint, request, jsonify
+from firebase_config import db
 
-# Import fungsi utama AI
+# Import Google API
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
+
 from ai_core.prediction_service import predict_sales
 
-# Tetapkan blueprint name tetap 'prediksi'
 prediksi_bp = Blueprint('prediksi', __name__)
 
-def get_real_weather(weather_index=1):
-    """
-    Mengambil data cuaca berdasarkan indeks hari.
-    weather_index 0 = Hari Ini
-    weather_index 1 = Besok
-    """
-    try:
-        # Koordinat Pekanbaru (Lokasi Varisha Jus)
-        lat, lon = 0.5071, 101.4478 
+# Konfigurasi Akses Cloud
+SCOPES = ['https://www.googleapis.com/auth/drive']
+GOOGLE_DRIVE_FILE_ID = '1VPHMSeWUrd3uFs1Q0TmnLZyjBWA6_Jo7'
+
+def get_drive_service():
+    """Fungsi pembacaan kredensial via Environment Variable yang anti-error JWT Signature"""
+    cred_json_str = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+    if not cred_json_str:
+        raise ValueError("❌ Variabel GOOGLE_CREDENTIALS_JSON tidak ditemukan!")
         
-        # Menambahkan hourly=relative_humidity_2m di URL API Open-Meteo
+    try:
+        cred_info = json.loads(cred_json_str)
+        if 'private_key' in cred_info:
+            pk = cred_info['private_key']
+            if "-----BEGIN PRIVATE KEY-----" in pk and "-----END PRIVATE KEY-----" in pk:
+                header = "-----BEGIN PRIVATE KEY-----"
+                footer = "-----END PRIVATE KEY-----"
+                core_key = pk.replace(header, "").replace(footer, "").strip()
+                core_key = core_key.replace(" ", "").replace("\\n", "").replace("\n", "").replace("\r", "")
+                wrapped_key = '\n'.join(textwrap.wrap(core_key, 64))
+                cred_info['private_key'] = f"{header}\n{wrapped_key}\n{footer}\n"
+            else:
+                cred_info['private_key'] = pk.replace('\\n', '\n')
+                
+        creds = service_account.Credentials.from_service_account_info(cred_info, scopes=SCOPES)
+        return build('drive', 'v3', credentials=creds)
+    except Exception as e:
+        print(f"❌ Kesalahan inisialisasi Google Auth: {e}")
+        raise e
+
+def pull_dataset_from_cloud():
+    """Fungsi untuk menarik CSV terbaru dari Drive langsung ke memori"""
+    try:
+        print("🔗 [AI-Sync] Menghubungkan ke Google Drive untuk Prediksi...")
+        service = get_drive_service()
+        request_download = service.files().get_media(fileId=GOOGLE_DRIVE_FILE_ID)
+        fh = io.BytesIO()
+        downloader = MediaIoBaseDownload(fh, request_download)
+        
+        done = False
+        while done is False:
+            status, done = downloader.next_chunk()
+            
+        fh.seek(0)
+        df_cloud = pd.read_csv(fh, sep=';')
+        return df_cloud
+    except Exception as e:
+        print(f"⚠️ [AI-Sync] Gagal menarik data Drive, menggunakan file lokal: {e}")
+        return None
+
+def get_real_weather(weather_index=1):
+    try:
+        lat, lon = 0.5071, 101.4478 
         url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&daily=temperature_2m_max,weathercode&hourly=relative_humidity_2m&timezone=Asia%2FBangkok"
         res = requests.get(url).json()
         
         temp = res['daily']['temperature_2m_max'][weather_index]
         code = res['daily']['weathercode'][weather_index]
-        
-        # Mengambil data kelembapan (humidity) pada jam 12:00 siang di hari target
         hour_index = (weather_index * 24) + 12
         humidity = res['hourly']['relative_humidity_2m'][hour_index]
         
-        # Logika interpretasi kode cuaca
         cond, insight, factor = "Cerah", "Cuaca bagus untuk jualan!", 0.9
         if code >= 51:
             cond, insight, factor = "Hujan", "Waspada hujan! Stok dikurangi agar efisien.", 0.3
         elif code <= 3:
             cond, insight, factor = "Cerah Berawan", "Suhu stabil, stok buah aman.", 0.8
             
-        return {
-            "temp": temp, 
-            "condition": cond, 
-            "humidity": humidity, 
-            "insight": insight, 
-            "factor": factor
-        }
+        return {"temp": temp, "condition": cond, "humidity": humidity, "insight": insight, "factor": factor}
     except Exception as e:
         print(f"❌ Weather API Error: {e}")
-        # Fallback data jika API Open-Meteo mengalami gangguan/limit
         return {"temp": 30, "condition": "Cerah", "humidity": 75, "insight": "Mode Offline Aktif.", "factor": 0.8}
 
-# PERBAIKAN RUTING: Ubah '' menjadi '/prediksi' agar cocok dengan axios.get di frontend kamu!
 @prediksi_bp.route('/prediksi', methods=['GET'])
 def get_prediction():
     try:
-        # 1. LOGIKA WAKTU OPERASIONAL (Belanja Subuh vs Prediksi Besok)
+        # 1. Logika Waktu
         now = datetime.now()
         current_hour = now.hour
-        
         if current_hour < 6:
-            target_label = "Hari Ini"
-            w_index = 0 
-            display_date = now.strftime("%A, %d %B %Y")
+            target_label, w_index, display_date = "Hari Ini", 0, now.strftime("%A, %d %B %Y")
         else:
-            target_label = "Besok"
-            w_index = 1
-            display_date = "Besok" 
+            target_label, w_index, display_date = "Besok", 1, "Besok" 
 
-        # 2. Ambil data cuaca sesuai indeks waktu
         weather = get_real_weather(w_index)
 
-        # 3. Ambil hasil prediksi dari AI Service (Bi-LSTM + Logic Hybrid)
-        ai_data = predict_sales(weather['factor'])
+        # 2. TARIK DATA REAL-TIME DARI CLOUD SEBELUM PREDIKSI
+        df_realtime = pull_dataset_from_cloud()
+
+        # 3. Suntikkan data cloud ke Model AI
+        ai_data = predict_sales(weather['factor'], df_cloud=df_realtime)
 
         # 4. Ambil stok aktual dari Firestore
         prods_ref = db.collection('products').stream()
@@ -80,30 +116,20 @@ def get_prediction():
         for d in prods_ref:
             p = d.to_dict()
             name_db = (p.get('nama') or p.get('name') or "").strip().lower()
-            db_items.append({
-                "id": d.id, 
-                "name": name_db, 
-                "stok": float(p.get('stok') or 0)
-            })
+            db_items.append({"id": d.id, "name": name_db, "stok": float(p.get('stok') or 0)})
 
-        # 5. Sinkronisasi Data (Matching nama produk AI dengan Database)
+        # 5. Sinkronisasi Data
         final_recommendations = []
         for item in ai_data:
             ai_name_lower = item['name'].lower().strip()
-            
-            # Cari produk yang cocok di Firestore (fuzzy match sederhana)
             match = next((x for x in db_items if ai_name_lower in x['name'] or x['name'] in ai_name_lower), None)
             
             if match:
                 final_recommendations.append({
-                    "id": match['id'],
-                    "name": item['name'],
-                    "currentStock": match['stok'],
-                    "predicted": item['predicted'],
-                    "unit": item['unit']
+                    "id": match['id'], "name": item['name'],
+                    "currentStock": match['stok'], "predicted": item['predicted'], "unit": item['unit']
                 })
 
-        # 6. Data untuk Visualisasi Grafik (Dummy untuk demo tren porsi)
         chart_data = [
             {"date": "H-4", "penjualan": random.randint(110, 140)},
             {"date": "H-3", "penjualan": random.randint(120, 150)},
@@ -114,10 +140,7 @@ def get_prediction():
 
         return jsonify({
             "status": "success",
-            "target_info": {
-                "label": target_label,
-                "date": display_date
-            },
+            "target_info": {"label": target_label, "date": display_date},
             "weather": weather,
             "chart": chart_data,
             "recommendations": final_recommendations

@@ -4,7 +4,6 @@ import pandas as pd
 import joblib
 import os
 
-# Konfigurasi Path Absolut Kritis untuk Lingkungan Serverless Vercel
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, 'model_bilstm.h5')
 SCALER_PATH = os.path.join(BASE_DIR, 'scaler.pkl')
@@ -15,7 +14,6 @@ scaler = None
 def load_ai_model():
     global model, scaler
     try:
-        # PENGAMAN VERCEL: Lakukan import dinamis agar tidak memicu ModuleNotFoundError
         try:
             import tensorflow as tf
             if os.path.exists(MODEL_PATH):
@@ -32,9 +30,9 @@ def load_ai_model():
 
 load_ai_model()
 
-def predict_sales(weather_factor=0.5):
+# PERUBAHAN: Menambahkan parameter df_cloud
+def predict_sales(weather_factor=0.5, df_cloud=None):
     try:
-        # 1. Konfigurasi Stok Awal Minimum (Safety Stock Standar Varisha Jus)
         min_stock_config = {
             "Apel": {"qty": 2, "unit": "kg", "ratio": 0.02},
             "Belimbing": {"qty": 2, "unit": "kg", "ratio": 0.02},
@@ -52,15 +50,23 @@ def predict_sales(weather_factor=0.5):
             "Timun": {"qty": 2, "unit": "kg", "ratio": 0.02}
         }
 
-        # 2. Amankan jalur pencarian dataset CSV di Cloud Runtime
         csv_path = os.path.abspath(os.path.join(BASE_DIR, '..', 'dataset', 'dataset_penjualan.csv'))
         total_cups_predicted = 150 
 
-        if model is not None and scaler is not None and os.path.exists(csv_path):
+        # 1. PRIORITAS SUMBER DATA: Gunakan Cloud jika ada, jika gagal gunakan Lokal
+        df = None
+        if df_cloud is not None and not df_cloud.empty:
+            df = df_cloud.copy()
+            print("🧠 AI Menganalisis Data REAL-TIME dari Google Drive!")
+        elif os.path.exists(csv_path):
             df = pd.read_csv(csv_path, sep=';')
+            print("💻 AI Menganalisis Data LOKAL (Fallback)!")
+
+        # 2. PROSES AI PREDIKSI
+        if df is not None and not df.empty:
             df['Tanggal'] = pd.to_datetime(df['Tanggal'], dayfirst=True)
             
-            if not df.empty:
+            if model is not None and scaler is not None:
                 last_7_days = df.tail(7).copy()
                 last_7_days['Hari'] = last_7_days['Tanggal'].dt.weekday
                 last_7_days['is_weekend'] = last_7_days['Hari'].map(lambda x: 1 if x >= 5 else 0)
@@ -74,16 +80,13 @@ def predict_sales(weather_factor=0.5):
                 
                 pred_scaled = model.predict(X_input, verbose=0)
                 total_cups_predicted = scaler.inverse_transform(pred_scaled)[0][0]
-        else:
-            # --- FALLBACK CERDAS UNTUK LINGKUNGAN VERCEL SERVERLESS ---
-            if os.path.exists(csv_path):
-                df = pd.read_csv(csv_path, sep=';')
-                if not df.empty:
-                    recent_sales = df.tail(5)['Total_Produk_Terjual'].values
-                    if len(recent_sales) == 5:
-                        total_cups_predicted = np.average(recent_sales, weights=[0.1, 0.1, 0.2, 0.2, 0.4])
-                    else:
-                        total_cups_predicted = np.mean(recent_sales)
+            else:
+                # --- FALLBACK CERDAS UNTUK LINGKUNGAN VERCEL SERVERLESS Tanpa TF ---
+                recent_sales = df.tail(5)['Total_Produk_Terjual'].values
+                if len(recent_sales) == 5:
+                    total_cups_predicted = np.average(recent_sales, weights=[0.1, 0.1, 0.2, 0.2, 0.4])
+                else:
+                    total_cups_predicted = np.mean(recent_sales)
 
         # 3. Pengaruh Faktor Cuaca Terhadap Multiplier Koefisien Penjualan
         weather_multiplier = 1.0
