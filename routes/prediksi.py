@@ -13,7 +13,6 @@ from firebase_config import db
 # Import Google API
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
 
 from ai_core.prediction_service import predict_sales
 
@@ -50,20 +49,16 @@ def get_drive_service():
         raise e
 
 def pull_dataset_from_cloud():
-    """Fungsi untuk menarik CSV terbaru dari Drive langsung ke memori"""
+    """Fungsi kilat untuk menarik CSV terbaru dari Drive langsung ke memori (Anti-Timeout)"""
     try:
         print("🔗 [AI-Sync] Menghubungkan ke Google Drive untuk Prediksi...")
         service = get_drive_service()
-        request_download = service.files().get_media(fileId=GOOGLE_DRIVE_FILE_ID)
-        fh = io.BytesIO()
-        downloader = MediaIoBaseDownload(fh, request_download)
         
-        done = False
-        while done is False:
-            status, done = downloader.next_chunk()
-            
-        fh.seek(0)
-        df_cloud = pd.read_csv(fh, sep=';')
+        # LANGSUNG EKSEKUSI: Mengambil seluruh bytes data sekaligus tanpa antrean chunk
+        file_bytes = service.files().get_media(fileId=GOOGLE_DRIVE_FILE_ID).execute()
+        
+        # Konversi bytes langsung menjadi DataFrame Pandas
+        df_cloud = pd.read_csv(io.BytesIO(file_bytes), sep=';')
         return df_cloud
     except Exception as e:
         print(f"⚠️ [AI-Sync] Gagal menarik data Drive, menggunakan file lokal: {e}")
