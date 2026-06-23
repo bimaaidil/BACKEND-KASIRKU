@@ -7,9 +7,9 @@ colorama==0.4.6
 contourpy==1.3.3
 cryptography==49.0.0
 cycler==0.12.1
+Firebase-admin==6.5.0
 Flask==3.1.2
 flask-cors==4.0.1
-firebase-admin==6.5.0
 fonttools==4.61.1
 fpdf==1.7.2
 google-api-core==2.31.0
@@ -40,6 +40,7 @@ pyasn1_modules==0.4.2
 pycparser==3.0
 pyparsing==3.3.1
 python-dateutil==2.9.0.post0
+python-dotenv==1.0.1
 pytz==2025.2
 requests==2.34.2
 requests-oauthlib==2.0.0
