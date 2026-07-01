@@ -66,8 +66,8 @@ def pull_dataset_from_cloud():
 
 def get_real_weather(weather_index=1):
     try:
-        lat, lon = -6.200000, 106.816666
-        url = f"https://api.open-meteo.com/v1/forecast?latitude=-6.200000&longitude=106.816666&daily=temperature_2m_max,weathercode&hourly=relative_humidity_2m&timezone=Asia%2FBangkok"
+        lat, lon = 0.5071, 101.4478 
+        url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&daily=temperature_2m_max,weathercode&hourly=relative_humidity_2m&timezone=Asia%2FBangkok"
         res = requests.get(url).json()
         
         temp = res['daily']['temperature_2m_max'][weather_index]
